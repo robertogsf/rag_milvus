@@ -1,0 +1,128 @@
+version: '3.8'
+
+# Configuración optimizada para producción
+services:
+  # Servicio Ollama
+  ollama:
+    image: ollama/ollama:latest
+    container_name: rag-ollama-prod
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_ORIGINS=*
+      - OLLAMA_KEEP_ALIVE=24h
+      - OLLAMA_HOST=0.0.0.0
+    restart: always
+    networks:
+      - rag-network
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 2G
+    command: >
+      sh -c "ollama serve &
+      sleep 15 &&
+      ollama pull qwen3:4b &&
+      wait"
+
+  # Servicio Milvus Standalone
+  milvus:
+    image: milvusdb/milvus:latest
+    container_name: rag-milvus-prod
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    volumes:
+      - milvus_data:/var/lib/milvus
+    environment:
+      - ETCD_USE_EMBED=true
+      - ETCD_DATA_DIR=/var/lib/milvus/etcd
+      - COMMON_STORAGETYPE=local
+      - MILVUS_CACHE_SIZE=2GB
+    security_opt:
+      - seccomp:unconfined
+    restart: always
+    networks:
+      - rag-network
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+        reservations:
+          memory: 1G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # Aplicación RAG
+  rag-app:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: rag-application-prod
+    depends_on:
+      - ollama
+      - milvus
+    volumes:
+      - ./data:/app/data:ro
+      - ./logs:/app/logs
+    environment:
+      - OLLAMA_HOST=ollama
+      - OLLAMA_PORT=11434
+      - OLLAMA_MODEL=qwen3:4b
+      - MILVUS_HOST=milvus
+      - MILVUS_PORT=19530
+      - PYTHONUNBUFFERED=1
+      - ENVIRONMENT=production
+    networks:
+      - rag-network
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
+    command: >
+      sh -c "
+      echo 'Esperando a que los servicios estén listos...' &&
+      sleep 45 &&
+      python test_docker.py &&
+      tail -f /dev/null
+      "
+
+  # Nginx para balanceador de carga (opcional)
+  nginx:
+    image: nginx:alpine
+    container_name: rag-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - rag-app
+    networks:
+      - rag-network
+    restart: always
+    profiles:
+      - nginx
+
+volumes:
+  ollama_data:
+    driver: local
+  milvus_data:
+    driver: local
+
+networks:
+  rag-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

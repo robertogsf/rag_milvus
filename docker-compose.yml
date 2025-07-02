@@ -1,0 +1,110 @@
+version: '3.8'
+
+services:
+  # Servicio Ollama
+  ollama:
+    image: ollama/ollama:latest
+    container_name: rag-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_ORIGINS=*
+    restart: unless-stopped
+    networks:
+      - rag-network
+    # Comando para descargar el modelo al iniciar
+    command: >
+      sh -c "ollama serve &
+      sleep 10 &&
+      ollama pull qwen3:4b &&
+      wait"
+
+  # Servicio Milvus Standalone
+  milvus:
+    image: milvusdb/milvus:latest
+    container_name: rag-milvus
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    volumes:
+      - milvus_data:/var/lib/milvus
+    environment:
+      - ETCD_USE_EMBED=true
+      - ETCD_DATA_DIR=/var/lib/milvus/etcd
+      - COMMON_STORAGETYPE=local
+    security_opt:
+      - seccomp:unconfined
+    restart: unless-stopped
+    networks:
+      - rag-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Aplicación RAG
+  rag-app:
+    build: .
+    container_name: rag-application
+    depends_on:
+      - ollama
+      - milvus
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - OLLAMA_HOST=ollama
+      - OLLAMA_PORT=11434
+      - OLLAMA_MODEL=qwen3:4b
+      - MILVUS_HOST=milvus
+      - MILVUS_PORT=19530
+    networks:
+      - rag-network
+    restart: unless-stopped
+    # Comando para esperar a que los servicios estén listos
+    command: >
+      sh -c "
+      echo 'Esperando a que Ollama y Milvus estén listos...' &&
+      sleep 30 &&
+      python example.py
+      "
+
+  # Servicio opcional: Jupyter Notebook para desarrollo
+  jupyter:
+    build: .
+    container_name: rag-jupyter
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./:/app
+      - ./data:/app/data
+    environment:
+      - OLLAMA_HOST=ollama
+      - OLLAMA_PORT=11434
+      - OLLAMA_MODEL=qwen3:4b
+      - MILVUS_HOST=milvus
+      - MILVUS_PORT=19530
+    depends_on:
+      - ollama
+      - milvus
+    networks:
+      - rag-network
+    command: >
+      sh -c "
+      pip install jupyter &&
+      jupyter notebook --ip=0.0.0.0 --port=8888 --no-browser --allow-root --NotebookApp.token=''
+      "
+    profiles:
+      - dev
+
+volumes:
+  ollama_data:
+  milvus_data:
+
+networks:
+  rag-network:
+    driver: bridge

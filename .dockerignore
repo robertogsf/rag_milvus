@@ -1,0 +1,56 @@
+# Archivos de Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Entornos virtuales
+venv/
+env/
+.venv/
+
+# Datos y logs
+data/
+logs/
+volumes/
+
+# Archivos de Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Variables de entorno
+.env.local
+.env.development
+.env.production
+
+# Git
+.git/
+.gitignore
+
+# Archivos del sistema
+.DS_Store
+Thumbs.db
+
+# Archivos temporales
+*.tmp
+*.temp
